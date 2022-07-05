@@ -2,10 +2,12 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 
 SITE = 'https://forums.eveonline.com/c/marketplace/character-bazaar/'
+thread_url = 'https://forums.eveonline.com/t/'
+excludes = ['wtb', 'sold', 'new skillboard', 'welcome to the character bazaar']
+scroll = 1000
 
 page = webdriver.Chrome()
 page.get(SITE)
-scroll = 1000
 
 threads = page.find_elements(By.CSS_SELECTOR, '.topic-list-item')
 
@@ -15,6 +17,8 @@ while len(threads) < 100:
     threads = page.find_elements(By.CSS_SELECTOR, '.topic-list-item')
 thread_data = [{'id': thread.get_attribute('data-topic-id'),
                 'name': thread.find_element(By.CSS_SELECTOR, '.title.raw-link.raw-topic-link').text,
-                'activity': thread.find_element(By.CSS_SELECTOR, '.relative-date').text} for thread in threads]
+                'activity': thread.find_element(By.CSS_SELECTOR, '.relative-date').text} for thread in threads
+               if all(string not in thread.find_element(By.CSS_SELECTOR, '.title.raw-link.raw-topic-link').text.lower()
+                      for string in excludes)]
 
 print(*thread_data, sep='\n')
