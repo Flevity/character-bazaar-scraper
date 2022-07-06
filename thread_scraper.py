@@ -4,7 +4,7 @@ import sqlite3
 
 SITE = 'https://forums.eveonline.com/c/marketplace/character-bazaar/'
 thread_url = 'https://forums.eveonline.com/t/'
-excludes = ['wtb', 'sold', 'new skillboard', 'welcome to the character bazaar', 'private']
+excludes = ['wtb', 'sold', 'new skillboard', 'welcome to the character bazaar', 'private', 'close']
 scroll = 1000
 
 page = webdriver.Firefox()
@@ -12,7 +12,7 @@ page.get(SITE)
 
 threads = page.find_elements(By.CSS_SELECTOR, '.topic-list-item')
 
-while len(threads) < 100:
+while len(threads) < 200:
     page.execute_script(f'window.scrollTo(0, {scroll})')
     scroll += 1000
     threads = page.find_elements(By.CSS_SELECTOR, '.topic-list-item')
