@@ -4,10 +4,14 @@ import sqlite3
 
 SITE = 'https://forums.eveonline.com/c/marketplace/character-bazaar/'
 thread_url = 'https://forums.eveonline.com/t/'
-excludes = ['wtb', 'sold', 'new skillboard', 'welcome to the character bazaar', 'private', 'close']
+excludes = ['wtb', 'sold', 'new skillboard', 'welcome to the character bazaar', 'private', 'close', 'cancel']
 scroll = 1000
 
-page = webdriver.Firefox()
+firefox_options = webdriver.FirefoxOptions()
+page = webdriver.Remote(
+    command_executor='127.0.0.1:4444',
+    options=firefox_options
+)
 page.get(SITE)
 
 threads = page.find_elements(By.CSS_SELECTOR, '.topic-list-item')
@@ -27,7 +31,7 @@ for thread in thread_data:
     page.get(thread_url + thread['id'])
     urls = page.find_elements(By.CSS_SELECTOR, '#post_1 .cooked a')
     for url in urls:
-        if 'skillboard.eveisesi.space' in url.get_attribute('href'):
+        if 'skillboard.eveisesi.space/users/' in url.get_attribute('href'):
             thread['url'] = url.get_attribute('href')
 
 thread_data = [thread for thread in thread_data if 'url' in thread]
