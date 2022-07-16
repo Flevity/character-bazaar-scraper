@@ -3,10 +3,56 @@ from selenium.webdriver.common.by import By
 import sqlite3
 import datetime
 
+db_file = 'data.db'
 SITE = 'https://forums.eveonline.com/c/marketplace/character-bazaar/'
 thread_url = 'https://forums.eveonline.com/t/'
 excludes = ['wtb', 'sold', 'new skillboard', 'welcome to the character bazaar', 'private', 'close', 'cancel']
 scroll = 1000
+
+
+def create_connection(file):
+    con = None
+    try:
+        con = sqlite3.connect(file)
+        print("DB created and connected.")
+    except sqlite3.Error as e:
+        print(e)
+
+    return con
+
+
+def create_schemas(connection):
+    cur = connection.cursor()
+
+    cur.execute(f'CREATE TABLE if not exists threads ('
+                f'id integer primary key, '
+                f'name text, '
+                f'last_update timestamp, '
+                f'activity text, '
+                f'url text);')
+
+    cur.execute(f'CREATE TABLE if not exists skill_groups ('
+                f'id integer primary key, '
+                f'name text);')
+
+    cur.execute(f'CREATE TABLE if not exists skills ('
+                f'id integer primary key, '
+                f'name text, '
+                f'group_id integer NOT NULL, '
+                f'FOREIGN KEY(group_id) REFERENCES skill_groups(id));')
+    cur.close()
+
+
+def upsert_threads_data(connection, data):
+    cur = connection.cursor()
+    cur.executemany(f'INSERT INTO threads (id, name, last_update, activity, url) '
+                    f'values (:id, :name, :last_update, :activity, :url) '
+                    f'on conflict(id) DO UPDATE SET name = excluded.name, last_update = excluded.last_update, '
+                    f'activity = excluded.activity, url = excluded.url', data)
+    connection.commit()
+    print("Threads data pushed to DB.")
+    cur.close()
+
 
 firefox_options = webdriver.FirefoxOptions()
 page = webdriver.Remote(
@@ -40,34 +86,10 @@ thread_data = [thread for thread in thread_data if 'url' in thread]
 print(f'{len(thread_data)} skillboard urls found.')
 print(*thread_data, sep='\n')
 
-db_file = 'data.db'
-table_name = 'threads'
+page.quit()
+print('Closing browser.')
 
-try:
-    sqlite_connection = sqlite3.connect(db_file)
-    cursor = sqlite_connection.cursor()
-    print("DB created and connected.")
-
-    cursor.execute(f'CREATE TABLE if not exists {table_name} ('
-                   f'id integer primary key, '
-                   f'name text, '
-                   f'last_update timestamp, '
-                   f'activity text, '
-                   f'url text);')
-
-    cursor.executemany(f'INSERT INTO {table_name}(id, name, last_update, activity, url) '
-                       f'values (:id, :name, :last_update, :activity, :url) '
-                       f'on conflict(id) DO UPDATE SET name = excluded.name, last_update = excluded.last_update, '
-                       f'activity = excluded.activity, url = excluded.url', thread_data)
-
-    sqlite_connection.commit()
-    print("Data pushed to DB.")
-    cursor.close()
-except sqlite3.Error as error:
-    print("Sqlite error:", error)
-finally:
-    if sqlite_connection:
-        sqlite_connection.close()
-        print("SQLite connection closed.")
-    page.quit()
-    print('Closing browser.')
+conn = create_connection(db_file)
+with conn:
+    create_schemas(conn)
+    upsert_threads_data(conn, thread_data)
