@@ -2,6 +2,8 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 import sqlite3
 import datetime
+import requests
+import json
 
 db_file = 'data.db'
 SITE = 'https://forums.eveonline.com/c/marketplace/character-bazaar/'
@@ -14,6 +16,8 @@ def create_connection(file):
     con = None
     try:
         con = sqlite3.connect(file)
+        con.cursor().execute('PRAGMA foreign_keys = ON')
+        con.cursor().close()
         print("DB created and connected.")
     except sqlite3.Error as e:
         print(e)
@@ -40,6 +44,23 @@ def create_schemas(connection):
                 f'name text, '
                 f'group_id integer NOT NULL, '
                 f'FOREIGN KEY(group_id) REFERENCES skill_groups(id));')
+
+    cur.execute(f'CREATE TABLE if not exists skillboard_urls ('
+                f'id integer primary key, '
+                f'url text, '
+                f'character_id integer unique, '
+                f'skills_last_update timestamp,'
+                f'thread_id integer NOT NULL, '
+                f'CONSTRAINT thread_id FOREIGN KEY(thread_id) REFERENCES threads(id) '
+                f'ON DELETE CASCADE);')
+
+    cur.execute(f'CREATE TABLE if not exists character_skills ('
+                f'id integer primary key, '
+                f'skill_id interger NOT NULL,'
+                f'skill_lvl integer,'
+                f'character_id integer NOT NULL,'
+                f'FOREIGN KEY(skill_id) REFERENCES skills(id),'
+                f'CONSTRAINT character_id FOREIGN KEY(character_id) REFERENCES skillboard_urls(character_id));')
     cur.close()
 
 
@@ -66,7 +87,9 @@ def delete_irrelevant_threads(connection):
 
 def parse_skillboard_urls(connection):
     cur = connection.cursor()
-    rows = cur.execute('SELECT id FROM threads WHERE url is NULL').fetchall()
+    rows = cur.execute('SELECT threads.id FROM threads '
+                       'LEFT JOIN skillboard_urls ON threads.id = skillboard_urls.thread_id '
+                       'WHERE skillboard_urls.url is NULL').fetchall()
     print(f'Starting to parse urls in {len(rows)} threads')
     urls = [row[0] for row in rows]
     skillboard_urls = []
@@ -86,16 +109,30 @@ def parse_skillboard_urls(connection):
         if url not in unique_skillboard_urls:
             unique_skillboard_urls.append(url)
     print(f'{len([row for row in unique_skillboard_urls if row[0] is not None])} skillboard ulrs found')
-    print(*[row for row in unique_skillboard_urls if row[0] is not None], sep='\n')
-    cur.executemany(f"UPDATE threads SET url = :0 WHERE id = :1", unique_skillboard_urls)
+    cur.executemany(f'INSERT INTO skillboard_urls (url, thread_id) '
+                    f'values (:0, :1) ', unique_skillboard_urls)
     connection.commit()
-    cur.execute(f'DELETE FROM threads WHERE url is NULL')
+    cur.execute(f'DELETE FROM threads WHERE id IN (SELECT threads.id FROM threads LEFT JOIN skillboard_urls '
+                f'ON threads.id = skillboard_urls.thread_id WHERE skillboard_urls.url is NULL)')
     connection.commit()
     print(f"Skillboard urls pushed to DB")
     cur.close()
 
     page.quit()
     print('Closing browser.')
+
+
+def get_skillboard_json(url):
+    start_json = 'JSON.parse(`'
+    end_json = 'console.log(skillzGrouped)'
+    r = requests.get(url)
+    body = r.text
+    skills = body[body.find(start_json) + len(start_json):body.find(end_json)].strip()[:-2]
+    try:
+        return json.loads(skills)
+    except json.decoder.JSONDecodeError as error:
+        print('There was a problem with JSON decoding, probably the broken url was used.', error)
+        return None
 
 
 firefox_options = webdriver.FirefoxOptions()
