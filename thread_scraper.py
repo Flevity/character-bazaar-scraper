@@ -49,18 +49,23 @@ def create_schemas(connection):
                 f'id integer primary key, '
                 f'url text, '
                 f'character_id integer unique, '
-                f'skills_last_update timestamp,'
+                f'last_update timestamp,'
                 f'thread_id integer NOT NULL, '
                 f'CONSTRAINT thread_id FOREIGN KEY(thread_id) REFERENCES threads(id) '
                 f'ON DELETE CASCADE);')
 
     cur.execute(f'CREATE TABLE if not exists character_skills ('
-                f'id integer primary key, '
                 f'skill_id interger NOT NULL,'
                 f'skill_lvl integer,'
                 f'character_id integer NOT NULL,'
                 f'FOREIGN KEY(skill_id) REFERENCES skills(id),'
-                f'CONSTRAINT character_id FOREIGN KEY(character_id) REFERENCES skillboard_urls(character_id));')
+                f'CONSTRAINT character_id FOREIGN KEY(character_id) REFERENCES characters(id));')
+
+    cur.execute(f'CREATE TABLE if not exists characters ('
+                f'id integer primary key, '
+                f'character_name text,'
+                f'skills_last_update timestamp NOT NULL);')
+
     cur.close()
 
 
@@ -122,17 +127,57 @@ def parse_skillboard_urls(connection):
     print('Closing browser.')
 
 
-def get_skillboard_json(url):
+def get_skillboard_json(connection, url):
     start_json = 'JSON.parse(`'
     end_json = 'console.log(skillzGrouped)'
     r = requests.get(url)
     body = r.text
     skills = body[body.find(start_json) + len(start_json):body.find(end_json)].strip()[:-2]
     try:
-        return json.loads(skills)
+        data = json.loads(skills)
+        # cur = connection.cursor()
+        # cur.execute(f'UPDATE skillboard_urls SET character_id =  WHERE url = "{url}";')
+        return data
     except json.decoder.JSONDecodeError as error:
         print('There was a problem with JSON decoding, probably the broken url was used.', error)
         return None
+
+
+def parse_skills(connection, data):
+    categories, skills = [], []
+    cur = connection.cursor()
+    for category in data:
+        categories.append((category["id"], category["name"]))
+        for skill in category["items"]:
+            skills.append((skill["id"], skill["name"], skill["group_id"]))
+    cur.executemany(f'INSERT INTO skill_groups(id, name) '
+                    f'values (:id, :name) '
+                    f'on conflict(id) DO UPDATE SET name = excluded.name', categories)
+
+    cur.executemany(f'INSERT INTO skills(id, name, group_id) '
+                    f'values (:id, :name, :group_id) '
+                    f'on conflict(id) DO UPDATE SET name = excluded.name, group_id = excluded.group_id;', skills)
+    connection.commit()
+    cur.close()
+
+
+def parse_character_skills(connection, data):
+    cur = connection.cursor()
+    character_skills = []
+    for category in data:
+        for skill in category["skills"]:
+            if skill["skill"]:
+                character_skills.append((skill["id"], skill["skill"]["trained_skill_level"],
+                                         skill["skill"]["character_id"]))
+
+    cur.execute(f'INSERT INTO characters(id, skills_last_update) '
+                f'VALUES ({character_skills[0][2]}, "{datetime.datetime.now()}") '
+                f'on conflict(id) DO UPDATE SET skills_last_update = excluded.skills_last_update;')
+
+    cur.executemany('INSERT INTO character_skills(skill_id, skill_lvl, character_id) '
+                    'VALUES (:skill_id, :skill_lvl, :character_id);', character_skills)
+    connection.commit()
+    cur.close()
 
 
 firefox_options = webdriver.FirefoxOptions()
@@ -159,3 +204,12 @@ with create_connection(db_file) as conn:
     upsert_threads_data(conn, thread_data)
     delete_irrelevant_threads(conn)
     parse_skillboard_urls(conn)
+
+    urls = conn.cursor().execute('SELECT url FROM skillboard_urls').fetchall()
+    conn.cursor().close()
+
+    for url in urls:
+        data = get_skillboard_json(conn, url[0])
+        if data:
+            parse_skills(conn, data)
+            parse_character_skills(conn, data)
