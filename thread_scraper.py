@@ -58,6 +58,7 @@ def create_schemas(connection):
                 f'skill_id interger NOT NULL,'
                 f'skill_lvl integer,'
                 f'character_id integer NOT NULL,'
+                f'UNIQUE(character_id, skill_id),'
                 f'FOREIGN KEY(skill_id) REFERENCES skills(id),'
                 f'CONSTRAINT character_id FOREIGN KEY(character_id) REFERENCES characters(id));')
 
@@ -175,7 +176,9 @@ def parse_character_skills(connection, data):
                 f'on conflict(id) DO UPDATE SET skills_last_update = excluded.skills_last_update;')
 
     cur.executemany('INSERT INTO character_skills(skill_id, skill_lvl, character_id) '
-                    'VALUES (:skill_id, :skill_lvl, :character_id);', character_skills)
+                    'VALUES (:skill_id, :skill_lvl, :character_id)'
+                    'on conflict(character_id, skill_id) '
+                    'DO UPDATE SET skill_lvl = excluded.skill_lvl;', character_skills)
     connection.commit()
     cur.close()
 
@@ -205,11 +208,11 @@ with create_connection(db_file) as conn:
     delete_irrelevant_threads(conn)
     parse_skillboard_urls(conn)
 
-    urls = conn.cursor().execute('SELECT url FROM skillboard_urls').fetchall()
+    skillboard_urls = conn.cursor().execute('SELECT url FROM skillboard_urls').fetchall()
     conn.cursor().close()
 
-    for url in urls:
-        data = get_skillboard_json(conn, url[0])
-        if data:
-            parse_skills(conn, data)
-            parse_character_skills(conn, data)
+    for skillboard_url in skillboard_urls:
+        character_data = get_skillboard_json(conn, skillboard_url[0])
+        if character_data:
+            parse_skills(conn, character_data)
+            parse_character_skills(conn, character_data)
