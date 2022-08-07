@@ -128,7 +128,7 @@ def parse_skillboard_urls(connection):
     print('Closing browser.')
 
 
-def get_skillboard_json(connection, url):
+def get_skillboard_json(url):
     start_json = 'JSON.parse(`'
     end_json = 'console.log(skillzGrouped)'
     r = requests.get(url)
@@ -136,8 +136,6 @@ def get_skillboard_json(connection, url):
     skills = body[body.find(start_json) + len(start_json):body.find(end_json)].strip()[:-2]
     try:
         data = json.loads(skills)
-        # cur = connection.cursor()
-        # cur.execute(f'UPDATE skillboard_urls SET character_id =  WHERE url = "{url}";')
         return data
     except json.decoder.JSONDecodeError as error:
         print('There was a problem with JSON decoding, probably the broken url was used.', error)
@@ -212,7 +210,7 @@ with create_connection(db_file) as conn:
     conn.cursor().close()
 
     for skillboard_url in skillboard_urls:
-        character_data = get_skillboard_json(conn, skillboard_url[0])
+        character_data = get_skillboard_json(skillboard_url[0])
         if character_data:
             parse_skills(conn, character_data)
             parse_character_skills(conn, character_data)
