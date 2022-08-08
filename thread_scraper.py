@@ -48,23 +48,24 @@ def create_schemas(connection):
     cur.execute(f'CREATE TABLE if not exists skillboard_urls ('
                 f'id integer primary key, '
                 f'url text, '
-                f'character_id integer unique, '
+                f'character_id integer, '
                 f'last_update timestamp,'
                 f'thread_id integer NOT NULL, '
                 f'CONSTRAINT thread_id FOREIGN KEY(thread_id) REFERENCES threads(id) '
+                f'ON DELETE CASCADE '
+                f'CONSTRAINT character_id FOREIGN KEY(character_id) REFERENCES characters(id) '
                 f'ON DELETE CASCADE);')
 
     cur.execute(f'CREATE TABLE if not exists character_skills ('
+                f'character_id integer NOT NULL,'
                 f'skill_id interger NOT NULL,'
                 f'skill_lvl integer,'
-                f'character_id integer NOT NULL,'
                 f'UNIQUE(character_id, skill_id),'
                 f'FOREIGN KEY(skill_id) REFERENCES skills(id),'
                 f'CONSTRAINT character_id FOREIGN KEY(character_id) REFERENCES characters(id));')
 
     cur.execute(f'CREATE TABLE if not exists characters ('
                 f'id integer primary key, '
-                f'character_name text,'
                 f'skills_last_update timestamp NOT NULL);')
 
     cur.close()
@@ -128,7 +129,7 @@ def parse_skillboard_urls(connection):
     print('Closing browser.')
 
 
-def get_skillboard_json(url):
+def get_skillboard_json(connection, url):
     start_json = 'JSON.parse(`'
     end_json = 'console.log(skillzGrouped)'
     r = requests.get(url)
@@ -138,7 +139,11 @@ def get_skillboard_json(url):
         data = json.loads(skills)
         return data
     except json.decoder.JSONDecodeError as error:
-        print('There was a problem with JSON decoding, probably the broken url was used.', error)
+        print(f'There was a problem with JSON decoding, probably the broken url was used. {error}, url: {url}')
+        cur = connection.cursor()
+        cur.execute(f"DELETE FROM skillboard_urls WHERE url = '{url}';")
+        connection.commit()
+        cur.close()
         return None
 
 
@@ -160,7 +165,7 @@ def parse_skills(connection, data):
     cur.close()
 
 
-def parse_character_skills(connection, data):
+def parse_character_skills(connection, data, url_id):
     cur = connection.cursor()
     character_skills = []
     for category in data:
@@ -172,6 +177,10 @@ def parse_character_skills(connection, data):
     cur.execute(f'INSERT INTO characters(id, skills_last_update) '
                 f'VALUES ({character_skills[0][2]}, "{datetime.datetime.now()}") '
                 f'on conflict(id) DO UPDATE SET skills_last_update = excluded.skills_last_update;')
+
+    cur.execute(f'UPDATE skillboard_urls '
+                f'SET character_id = {character_skills[0][2]} '
+                f'WHERE id = {url_id};')
 
     cur.executemany('INSERT INTO character_skills(skill_id, skill_lvl, character_id) '
                     'VALUES (:skill_id, :skill_lvl, :character_id)'
@@ -206,11 +215,11 @@ with create_connection(db_file) as conn:
     delete_irrelevant_threads(conn)
     parse_skillboard_urls(conn)
 
-    skillboard_urls = conn.cursor().execute('SELECT url FROM skillboard_urls').fetchall()
+    skillboard_urls = conn.cursor().execute('SELECT url, id FROM skillboard_urls').fetchall()
     conn.cursor().close()
 
     for skillboard_url in skillboard_urls:
-        character_data = get_skillboard_json(skillboard_url[0])
+        character_data = get_skillboard_json(conn, skillboard_url[0])
         if character_data:
             parse_skills(conn, character_data)
-            parse_character_skills(conn, character_data)
+            parse_character_skills(conn, character_data, skillboard_url[1])
